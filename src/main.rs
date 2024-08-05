@@ -3,10 +3,11 @@ use log::{debug, info};
 use regex::Regex;
 use serde::Deserialize;
 use std::env;
-use std::fs::File;
 use std::io::{self, Write};
 use std::path::PathBuf;
 use std::process::{Command as ProcessCommand, Stdio};
+
+mod xdg;
 
 #[derive(Debug, Deserialize)]
 struct Config {
@@ -64,16 +65,13 @@ fn main() -> io::Result<()> {
 }
 
 fn generate_files() -> io::Result<()> {
-    let config_path = get_config_path()?;
-    debug!("Using configuration file at: {:?}", config_path);
+    let (path, config_file) = xdg::get_config_file(CONFIG_FILE_PATH)?;
+    debug!("Use config file {:?}", path);
 
-    let config: Config = serde_yaml::from_reader(File::open(config_path)?)
+    let config: Config = serde_yaml::from_reader(config_file)
         .map_err(|e| io::Error::new(io::ErrorKind::Other, e.to_string()))?;
-
-    // Print the version from the configuration file
     debug!("Config version: {}", config.version);
 
-    // Get desktop files from XDG_DATA_DIRS
     let desktop_files = get_desktop_files()?;
 
     // Process each desktop file
@@ -88,7 +86,6 @@ fn generate_files() -> io::Result<()> {
                 continue;
             }
 
-            // Print the name of the generator
             debug!(
                 "Applying generator {} on {}",
                 generator.name,
@@ -116,39 +113,6 @@ fn generate_files() -> io::Result<()> {
     }
 
     Ok(())
-}
-
-fn get_config_path() -> io::Result<PathBuf> {
-    // Check XDG_CONFIG_HOME
-    let xdg_config_home = env::var("XDG_CONFIG_HOME").unwrap_or_else(|_| {
-        let home = env::var("HOME").expect("HOME environment variable not set");
-        format!("{}/.config", home)
-    });
-    let config_path = PathBuf::from(xdg_config_home).join(CONFIG_FILE_PATH);
-    if config_path.exists() {
-        return Ok(config_path);
-    }
-
-    // Check XDG_CONFIG_DIRS
-    let xdg_config_dirs = env::var("XDG_CONFIG_DIRS").unwrap_or_else(|_| "/etc/xdg".to_string());
-    let paths: Vec<PathBuf> = env::split_paths(&xdg_config_dirs).collect();
-    for path in paths {
-        let config_path = path.join(CONFIG_FILE_PATH);
-        if config_path.exists() {
-            return Ok(config_path);
-        }
-    }
-
-    // Check default config path
-    let default_config_path = PathBuf::from("/etc/xdg").join(CONFIG_FILE_PATH);
-    if default_config_path.exists() {
-        return Ok(default_config_path);
-    }
-
-    Err(io::Error::new(
-        io::ErrorKind::NotFound,
-        "Configuration file not found",
-    ))
 }
 
 fn get_desktop_files() -> io::Result<Vec<PathBuf>> {
@@ -248,18 +212,6 @@ mod tests {
     use super::*;
     use std::fs::{self, File};
     use tempfile::tempdir;
-
-    #[test]
-    fn test_get_config_path() {
-        let dir = tempdir().unwrap();
-        let config_path = dir.path().join("xdg-desktop-file-override/config.yaml");
-        fs::create_dir_all(config_path.parent().unwrap()).unwrap();
-        File::create(&config_path).unwrap();
-
-        env::set_var("XDG_CONFIG_HOME", dir.path().to_str().unwrap());
-        let result = get_config_path().unwrap();
-        assert_eq!(result, config_path);
-    }
 
     #[test]
     fn test_get_desktop_files() {
