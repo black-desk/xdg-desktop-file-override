@@ -1,5 +1,5 @@
 use clap::Command;
-use log::{debug, info};
+use log::{debug, info, error};
 use regex::Regex;
 use serde::Deserialize;
 use std::env;
@@ -25,8 +25,6 @@ struct Generator {
 const CONFIG_FILE_PATH: &str = "xdg-desktop-file-override/config.yaml";
 
 fn main() -> io::Result<()> {
-    env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
-
     let command = Command::new("xdg-desktop-file-override")
         .version(env!("CARGO_PKG_VERSION"))
         .author("Chen Linxuan <me@black-desk.cn>")
@@ -43,9 +41,13 @@ fn main() -> io::Result<()> {
         .subcommand(Command::new("clean").about("Remove all generated desktop files."))
         .subcommand(Command::new("generate").about("Generate override desktop files."));
 
-    debug!("version: {}", command.get_version().unwrap());
+    let matches = command.clone().get_matches();
 
-    let matches = command.get_matches();
+    // Set log level, use debug level if --debug parameter is provided
+    let log_level = if matches.get_flag("debug") { "debug" } else { "info" };
+    env_logger::Builder::from_env(env_logger::Env::default().default_filter_or(log_level)).init();
+
+    debug!("version: {}", command.get_version().unwrap_or("unknown"));
 
     if let Some(_matches) = matches.subcommand_matches("clean") {
         clean_generated_files()?;
@@ -155,6 +157,12 @@ fn apply_generator(command: &[String], input: &str) -> io::Result<std::process::
     }
 
     let output = child.wait_with_output()?;
+    
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        error!("Command failed: {:?}, stderr: {}", command, stderr);
+    }
+    
     Ok(output)
 }
 
